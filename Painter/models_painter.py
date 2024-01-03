@@ -409,15 +409,15 @@ class Painter(nn.Module):
         x = torch.cat((x, y), dim=0)
         # apply Transformer blocks
         out = []
-        reprs = []
+        #reprs = []
         for idx, blk in enumerate(self.blocks):
             x = blk(x)
             if idx == merge_idx:
                 x = (x[:x.shape[0]//2] + x[x.shape[0]//2:]) * 0.5
             if idx in [5, 11, 17, 23]:
                 out.append(self.norm(x))
-            reprs.append(x)
-        return out, reprs
+            #reprs.append(x)
+        return out#, reprs
 
     def forward_decoder(self, x):
         # predictor projection
@@ -468,10 +468,15 @@ class Painter(nn.Module):
             bool_masked_pos = torch.zeros((imgs.shape[0], self.patch_embed.num_patches), dtype=torch.bool).to(imgs.device)
         else:
             bool_masked_pos = bool_masked_pos.flatten(1).to(torch.bool)
-        latent, encoder_representations = self.forward_encoder(imgs, tgts, bool_masked_pos)
+        #latent, encoder_representations = self.forward_encoder(imgs, tgts, bool_masked_pos)
+        latent = self.forward_encoder(imgs, tgts, bool_masked_pos)
+
+        stacked_latent = torch.stack(latent, dim=0)
+        stacked_latent_no_grad = stacked_latent.detach()
+
         pred = self.forward_decoder(latent)  # [N, L, p*p*3]
         loss = self.forward_loss(pred, tgts, bool_masked_pos, valid)
-        return loss, self.patchify(pred), bool_masked_pos, encoder_representations
+        return loss, self.patchify(pred), bool_masked_pos, stacked_latent
 
 
 

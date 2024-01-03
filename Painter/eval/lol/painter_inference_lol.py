@@ -12,7 +12,6 @@ import os
 import warnings
 import pickle
 
-import requests
 import argparse
 
 import torch
@@ -30,6 +29,7 @@ import models_painter
 from skimage.metrics import peak_signal_noise_ratio as psnr_loss
 from skimage.metrics import structural_similarity as ssim_loss
 import datetime
+import time
 
 
 imagenet_mean = np.array([0.485, 0.456, 0.406])
@@ -91,8 +91,10 @@ def get_args_parser():
                         default=False)
     parser.add_argument('--save_reprs', action='store_true', help='save token representations through layers',
                         default=False)
-    parser.add_argument('--all_prompts', action='store_true', help='Run each eval with all prompts',
+    parser.add_argument('--many_prompts', action='store_true', help='Run each eval with all prompts',
                         default=False)
+    parser.add_argument('--prompt_count', type=str, help='how many randomly sampled prompts',
+                        default='1')
                                             
     return parser.parse_args()
 
@@ -104,19 +106,18 @@ if __name__ == '__main__':
     model = args.model
     prompt = args.prompt
     input_size = args.input_size
-    all_prompts = args.all_prompts
+    many_prompts = args.many_prompts
     save_reprs = args.save_reprs
 
     path_splits = ckpt_path.split('/')
     ckpt_dir, ckpt_file = path_splits[-2], path_splits[-1]
     
     current_date = datetime.datetime.now().strftime("%Y-%m-%d")
+    current_time = time.strftime("%H-%M-%S")
     dst_dir = os.path.join('models_inference', ckpt_dir.split('/')[-1],
-                           "lol_inference_{}_{}".format(ckpt_file, current_date))
+                           "lol_inference_{}_{}_{}".format(ckpt_file, current_date, current_time))
 
-    if not os.path.exists(dst_dir):
-        os.makedirs(dst_dir)
-    print("output_dir: {}".format(dst_dir))
+    
 
     model_painter = prepare_model(ckpt_path, model)
     print('Model loaded.')
@@ -129,11 +130,15 @@ if __name__ == '__main__':
 
     prompt_src_dir = "datasets/light_enhance/our485/low"
 
-    if not all_prompts:
+    if not many_prompts:
         prompt_path_list = [os.path.join(prompt_src_dir, prompt + ".png")]
     else:
         prompt_path_list = glob.glob(os.path.join(prompt_src_dir, "*.png"))
+        prompt_path_list = np.random.choice(prompt_path_list, int(args.prompt_count), replace=False)
 
+    if not os.path.exists(dst_dir):
+        os.makedirs(dst_dir)
+    print("output_dir: {}".format(dst_dir))
     if save_reprs:
         pickle_file_path = os.path.join(dst_dir, 'logs.pkl')
 
