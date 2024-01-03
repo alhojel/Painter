@@ -10,6 +10,7 @@
 import sys
 import os
 import warnings
+import pickle
 
 import requests
 import argparse
@@ -28,6 +29,7 @@ import models_painter
 
 from skimage.metrics import peak_signal_noise_ratio as psnr_loss
 from skimage.metrics import structural_similarity as ssim_loss
+import datetime
 
 
 imagenet_mean = np.array([0.485, 0.456, 0.406])
@@ -58,7 +60,7 @@ def run_one_image(img, tgt, size, model, out_path, device):
     bool_masked_pos = bool_masked_pos.unsqueeze(dim=0)
 
     valid = torch.ones_like(tgt)
-    loss, y, mask = model(x.float().to(device), tgt.float().to(device), bool_masked_pos.to(device), valid.float().to(device))
+    loss, y, mask, encoder_representations = model(x.float().to(device), tgt.float().to(device), bool_masked_pos.to(device), valid.float().to(device))
     y = model.unpatchify(y)
     y = torch.einsum('nchw->nhwc', y).detach().cpu()
 
@@ -67,7 +69,7 @@ def run_one_image(img, tgt, size, model, out_path, device):
     output = F.interpolate(
         output[None, ...].permute(0, 3, 1, 2), size=[size[1], size[0]], mode='bicubic').permute(0, 2, 3, 1)[0]
 
-    return output.numpy()
+    return output.numpy(), encoder_representations
 
 
 def myPSNR(tar_img, prd_img):
@@ -85,8 +87,13 @@ def get_args_parser():
     parser.add_argument('--prompt', type=str, help='prompt image in train set',
                         default='100')
     parser.add_argument('--input_size', type=int, default=448)
-    parser.add_argument('--save', action='store_true', help='save predictions',
+    parser.add_argument('--save_pred', action='store_true', help='save predictions',
                         default=False)
+    parser.add_argument('--save_reprs', action='store_true', help='save token representations through layers',
+                        default=False)
+    parser.add_argument('--all_prompts', action='store_true', help='Run each eval with all prompts',
+                        default=False)
+                                            
     return parser.parse_args()
 
 
@@ -97,11 +104,16 @@ if __name__ == '__main__':
     model = args.model
     prompt = args.prompt
     input_size = args.input_size
+    all_prompts = args.all_prompts
+    save_reprs = args.save_reprs
 
     path_splits = ckpt_path.split('/')
     ckpt_dir, ckpt_file = path_splits[-2], path_splits[-1]
+    
+    current_date = datetime.datetime.now().strftime("%Y-%m-%d")
     dst_dir = os.path.join('models_inference', ckpt_dir.split('/')[-1],
-                           "lol_inference_{}_{}".format(ckpt_file, os.path.basename(prompt).split(".")[0]))
+                           "lol_inference_{}_{}".format(ckpt_file, current_date))
+
     if not os.path.exists(dst_dir):
         os.makedirs(dst_dir)
     print("output_dir: {}".format(dst_dir))
@@ -115,73 +127,86 @@ if __name__ == '__main__':
     img_src_dir = "datasets/light_enhance/eval15/low"
     img_path_list = glob.glob(os.path.join(img_src_dir, "*.png"))
 
-    img2_path = "datasets/light_enhance/our485/low/{}.png".format(prompt)
-    tgt2_path = "datasets/light_enhance/our485/high/{}.png".format(prompt)
-    print('prompt: {}'.format(tgt2_path))
+    prompt_src_dir = "datasets/light_enhance/our485/low"
 
-    # load the shared prompt image pair
-    img2 = Image.open(img2_path).convert("RGB")
-    img2 = img2.resize((input_size, input_size))
-    img2 = np.array(img2) / 255.
+    if not all_prompts:
+        prompt_path_list = [os.path.join(prompt_src_dir, prompt + ".png")]
+    else:
+        prompt_path_list = glob.glob(os.path.join(prompt_src_dir, "*.png"))
 
-    tgt2 = Image.open(tgt2_path)
-    tgt2 = tgt2.resize((input_size, input_size))
-    tgt2 = np.array(tgt2) / 255.
+    if save_reprs:
+        pickle_file_path = os.path.join(dst_dir, 'logs.pkl')
 
-    psnr_val_rgb = []
-    ssim_val_rgb = []
-    model_painter.eval()
-    for img_path in tqdm.tqdm(img_path_list):
-        """ Load an image """
-        img_name = os.path.basename(img_path)
-        out_path = os.path.join(dst_dir, img_name)
-        img_org = Image.open(img_path).convert("RGB")
-        size = img_org.size
-        img = img_org.resize((input_size, input_size))
-        img = np.array(img) / 255.
+    for prompt_img_path in tqdm.tqdm(prompt_path_list):
 
-        # load gt
-        rgb_gt = Image.open(img_path.replace('low', 'high')).convert("RGB")  # irrelevant to prompt-type
-        rgb_gt = np.array(rgb_gt) / 255.
+        img2_path = prompt_img_path
+        tgt2_path = prompt_img_path.replace('low', 'high')
+        print('prompt: {}'.format(os.path.basename(prompt_img_path)))
 
-        img = np.concatenate((img2, img), axis=0)
-        assert img.shape == (input_size * 2, input_size, 3)
-        # normalize by ImageNet mean and std
-        img = img - imagenet_mean
-        img = img / imagenet_std
+        # load the shared prompt image pair
+        img2 = Image.open(img2_path).convert("RGB")
+        img2 = img2.resize((input_size, input_size))
+        img2 = np.array(img2) / 255.
 
-        tgt = tgt2  # tgt is not available
-        tgt = np.concatenate((tgt2, tgt), axis=0)
+        tgt2 = Image.open(tgt2_path)
+        tgt2 = tgt2.resize((input_size, input_size))
+        tgt2 = np.array(tgt2) / 255.
+        
+        model_painter.eval()
+        for img_path in tqdm.tqdm(img_path_list):
+            """ Load an image """
+            img_name = os.path.basename(img_path)
+            out_path = os.path.join(dst_dir, img_name)
+            img_org = Image.open(img_path).convert("RGB")
+            size = img_org.size
+            img = img_org.resize((input_size, input_size))
+            img = np.array(img) / 255.
 
-        assert tgt.shape == (input_size * 2, input_size, 3)
-        # normalize by ImageNet mean and std
-        tgt = tgt - imagenet_mean
-        tgt = tgt / imagenet_std
+            # load gt
+            rgb_gt = Image.open(img_path.replace('low', 'high')).convert("RGB")  # irrelevant to prompt-type
+            rgb_gt = np.array(rgb_gt) / 255.
 
-        # make random mask reproducible (comment out to make it change)
-        torch.manual_seed(2)
+            img = np.concatenate((img2, img), axis=0)
+            assert img.shape == (input_size * 2, input_size, 3)
+            # normalize by ImageNet mean and std
+            img = img - imagenet_mean
+            img = img / imagenet_std
 
-        output = run_one_image(img, tgt, size, model_painter, out_path, device)
-        rgb_restored = output
-        rgb_restored = np.clip(rgb_restored, 0, 1)
+            tgt = tgt2  # tgt is not available
+            tgt = np.concatenate((tgt2, tgt), axis=0)
 
-        psnr = psnr_loss(rgb_restored, rgb_gt)
-        ssim = ssim_loss(rgb_restored, rgb_gt, multichannel=True)
-        psnr_val_rgb.append(psnr)
-        ssim_val_rgb.append(ssim)
-        print("PSNR:", psnr, ", SSIM:", ssim, img_name, rgb_restored.shape)
+            assert tgt.shape == (input_size * 2, input_size, 3)
+            # normalize by ImageNet mean and std
+            tgt = tgt - imagenet_mean
+            tgt = tgt / imagenet_std
 
-        if args.save:
-            output = rgb_restored * 255
-            output = Image.fromarray(output.astype(np.uint8))
-            output.save(out_path)
+            # make random mask reproducible (comment out to make it change)
+            torch.manual_seed(2)
 
-        with open(os.path.join(dst_dir, 'psnr_ssim.txt'), 'a') as f:
-            f.write(img_name+' ---->'+" PSNR: %.4f, SSIM: %.4f] " % (psnr, ssim)+'\n')
+            output, representations = run_one_image(img, tgt, size, model_painter, out_path, device)
+            rgb_restored = output
+            rgb_restored = np.clip(rgb_restored, 0, 1)
 
-    psnr_val_rgb = sum(psnr_val_rgb) / len(img_path_list)
-    ssim_val_rgb = sum(ssim_val_rgb) / len(img_path_list)
-    print("PSNR: %f, SSIM: %f " % (psnr_val_rgb, ssim_val_rgb))
-    print(ckpt_path)
-    with open(os.path.join(dst_dir, 'psnr_ssim.txt'), 'a') as f:
-        f.write("PSNR: %.4f, SSIM: %.4f] " % (psnr_val_rgb, ssim_val_rgb)+'\n')
+            psnr = psnr_loss(rgb_restored, rgb_gt)
+            ssim = ssim_loss(rgb_restored, rgb_gt, multichannel=True, channel_axis=-1, data_range=1)
+
+            logs_arr = [os.path.basename(prompt_img_path), img_name,psnr, ssim, "ReprMatrix"]
+
+            print("PSNR:", psnr, ", SSIM:", ssim, img_name, rgb_restored.shape)
+
+            if args.save_pred:
+                output = rgb_restored * 255
+                output = Image.fromarray(output.astype(np.uint8))
+                output.save(out_path)
+
+            record = {
+                "Prompt": os.path.basename(prompt_img_path),
+                "Query": img_name,
+                "PSNR": psnr,
+                "SSIM": ssim,
+                "ReprMatrix": representations
+            }
+
+            if save_reprs:
+                with open(pickle_file_path, 'ab') as f:
+                    pickle.dump(record, f)
