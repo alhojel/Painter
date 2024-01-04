@@ -21,7 +21,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 import timm
 
-assert timm.__version__ == "0.3.2"  # version check
+#assert timm.__version__ == "0.3.2"  # version check
 
 import util.lr_decay as lrd
 import util.misc as misc
@@ -158,6 +158,8 @@ def get_args_parser():
     parser.add_argument('--log_wandb', action='store_true', default=False,
                     help='log training and validation metrics to wandb')
 
+    parser.add_argument('--eval_only', action='store_true', help='Run evaluation only')
+
     known_args, _ = parser.parse_known_args()
 
     if known_args.enable_deepspeed:
@@ -259,7 +261,7 @@ def main(args, ds_init):
         min_num_patches=args.min_mask_patches_per_block,
     )
     dataset_train = PairDataset(args.data_path, args.json_path, transform=transform_train, transform2=transform_train2, transform3=transform_train3, transform_seccrop=transform_train_seccrop, masked_position_generator=masked_position_generator, use_two_pairs=args.use_two_pairs, half_mask_ratio=args.half_mask_ratio)
-    dataset_val = PairDataset(args.data_path, args.val_json_path, transform=transform_val, transform2=None, transform3=None, masked_position_generator=masked_position_generator, use_two_pairs=args.use_two_pairs, half_mask_ratio=1.0)
+    dataset_val = PairDataset(args.data_path, args.val_json_path, transform=transform_val, transform2=None, transform3=None, masked_position_generator=masked_position_generator, use_two_pairs=args.use_two_pairs, half_mask_ratio=1.0, store_type=args.eval_only)
     print(dataset_train)
     print(dataset_val)
 
@@ -357,17 +359,18 @@ def main(args, ds_init):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             data_loader_train.sampler.set_epoch(epoch)
-        train_stats = train_one_epoch(
-            model, data_loader_train,
-            optimizer, device, epoch, loss_scaler,
-            log_writer=log_writer,
-            global_rank=global_rank,
-            args=args
-        )
-        if args.output_dir and (epoch % args.save_freq == 0 or epoch + 1 == args.epochs):
-            misc.save_model(
-                args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
-                loss_scaler=loss_scaler, epoch=epoch)
+        if not args.eval_only:
+            train_stats = train_one_epoch(
+                model, data_loader_train,
+                optimizer, device, epoch, loss_scaler,
+                log_writer=log_writer,
+                global_rank=global_rank,
+                args=args
+            )
+            if args.output_dir and (epoch % args.save_freq == 0 or epoch + 1 == args.epochs):
+                misc.save_model(
+                    args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
+                    loss_scaler=loss_scaler, epoch=epoch)
 
         test_stats = evaluate_pt(data_loader_val, model, device, epoch=epoch, global_rank=global_rank, args=args)
         print(f"Val loss of the network on the {len(dataset_val)} test images: {test_stats['loss']:.3f}")
@@ -388,7 +391,6 @@ def main(args, ds_init):
 
     if global_rank == 0 and args.log_wandb:
         wandb.finish()
-
 
 if __name__ == '__main__':
     args, ds_init = get_args_parser()

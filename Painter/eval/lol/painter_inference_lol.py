@@ -95,6 +95,10 @@ def get_args_parser():
                         default=False)
     parser.add_argument('--prompt_count', type=str, help='how many randomly sampled prompts',
                         default='1')
+    parser.add_argument('--no_task_low', action='store_true', help='Lowlight Task-less ICL prompt',
+                        default=False)
+    parser.add_argument('--no_task_high', action='store_true', help='Highlight Task-less ICL prompt',
+                        default=False)
                                             
     return parser.parse_args()
 
@@ -116,8 +120,6 @@ if __name__ == '__main__':
     current_time = time.strftime("%H-%M-%S")
     dst_dir = os.path.join('models_inference', ckpt_dir.split('/')[-1],
                            "lol_inference_{}_{}_{}".format(ckpt_file, current_date, current_time))
-
-    
 
     model_painter = prepare_model(ckpt_path, model)
     print('Model loaded.')
@@ -148,6 +150,12 @@ if __name__ == '__main__':
         tgt2_path = prompt_img_path.replace('low', 'high')
         print('prompt: {}'.format(os.path.basename(prompt_img_path)))
 
+        if args.no_task_low:
+            tgt2_path = img2_path
+
+        elif args.no_task_high:
+            img2_path = tgt2_path
+
         # load the shared prompt image pair
         img2 = Image.open(img2_path).convert("RGB")
         img2 = img2.resize((input_size, input_size))
@@ -160,6 +168,15 @@ if __name__ == '__main__':
         model_painter.eval()
         for img_path in tqdm.tqdm(img_path_list):
             """ Load an image """
+            
+            rgb_gt_path = img_path.replace('low', 'high')
+
+            if args.no_task_low:
+                rgb_gt_path = img_path
+
+            elif args.no_task_high:
+                img_path = rgb_gt_path
+            
             img_name = os.path.basename(img_path)
             out_path = os.path.join(dst_dir, img_name)
             img_org = Image.open(img_path).convert("RGB")
@@ -168,7 +185,7 @@ if __name__ == '__main__':
             img = np.array(img) / 255.
 
             # load gt
-            rgb_gt = Image.open(img_path.replace('low', 'high')).convert("RGB")  # irrelevant to prompt-type
+            rgb_gt = Image.open(rgb_gt_path).convert("RGB")  # irrelevant to prompt-type
             rgb_gt = np.array(rgb_gt) / 255.
 
             img = np.concatenate((img2, img), axis=0)
@@ -187,6 +204,8 @@ if __name__ == '__main__':
 
             # make random mask reproducible (comment out to make it change)
             torch.manual_seed(2)
+
+            import pdb; breakpoint()
 
             output, representations = run_one_image(img, tgt, size, model_painter, out_path, device)
             rgb_restored = output

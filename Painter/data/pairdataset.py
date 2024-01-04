@@ -48,9 +48,11 @@ class PairDataset(VisionDataset):
         masked_position_generator: Optional[Callable] = None,
         use_two_pairs: bool = True,
         half_mask_ratio:float = 0.,
+        store_type: bool = False,
     ) -> None:
         super().__init__(root, transforms, transform, target_transform)
 
+        self.store_type = store_type
         self.pairs = []
         self.weights = []
         type_weight_list = [0.1, 0.2, 0.15, 0.25, 0.2, 0.15, 0.05, 0.05]
@@ -186,9 +188,10 @@ class PairDataset(VisionDataset):
             mask[mask.shape[0]//2:, :] = 1
         else:
             mask = self.masked_position_generator()
-        
-        return image, target, mask, valid
-
+        if self.store_type:
+            return image, target, mask, valid, pair['type']
+        else:
+            return image, target, mask, valid
     def __len__(self) -> int:
         return len(self.pairs)
 

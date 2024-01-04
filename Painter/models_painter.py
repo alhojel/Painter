@@ -471,7 +471,7 @@ class Painter(nn.Module):
         #latent, encoder_representations = self.forward_encoder(imgs, tgts, bool_masked_pos)
         latent = self.forward_encoder(imgs, tgts, bool_masked_pos)
 
-        stacked_latent = torch.stack(latent, dim=0)
+        stacked_latent = torch.stack(latent, dim=0).transpose(0, 1)
         stacked_latent_no_grad = stacked_latent.detach()
 
         pred = self.forward_decoder(latent)  # [N, L, p*p*3]

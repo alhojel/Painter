@@ -12,7 +12,7 @@ import sys
 from typing import Iterable
 
 import torch
-
+import pickle
 import util.misc as misc
 import util.lr_sched as lr_sched
 
@@ -156,6 +156,7 @@ def evaluate_pt(data_loader, model, device, epoch=None, global_rank=None, args=N
         targets = batch[1]
         bool_masked_pos = batch[2]
         valid = batch[3]
+        meta = batch[4]
         samples = samples.to(device, non_blocking=True)
         targets = targets.to(device, non_blocking=True)
         bool_masked_pos = bool_masked_pos.to(device, non_blocking=True)
@@ -163,7 +164,14 @@ def evaluate_pt(data_loader, model, device, epoch=None, global_rank=None, args=N
 
         # compute output
         with torch.cuda.amp.autocast():
-            loss, y, mask = model(samples, targets, bool_masked_pos=bool_masked_pos, valid=valid)
+            loss, y, mask, stacked_latent = model(samples, targets, bool_masked_pos=bool_masked_pos, valid=valid)
+
+        assert stacked_latent.shape[0] == len(meta)
+        batched_records = [(stacked_latent[i], meta[i]) for i in range(len(meta))]
+        
+        pickle_file_path = 'eval.pkl'  # Replace with your file path
+        with open(pickle_file_path, 'ab') as f:
+            pickle.dump(batched_records, f)
 
         metric_logger.update(loss=loss.item())
         if global_rank == 0 and args.log_wandb:
@@ -189,6 +197,10 @@ def evaluate_pt(data_loader, model, device, epoch=None, global_rank=None, args=N
             frame = frame[0]
             frame = torch.clip((frame * imagenet_std + imagenet_mean) * 255, 0, 255).int()
             wandb_images.append(wandb.Image(frame.numpy(), caption="x; im_masked; y; tgt"))
+
+        
+
+
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
