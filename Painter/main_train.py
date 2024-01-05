@@ -159,6 +159,7 @@ def get_args_parser():
                     help='log training and validation metrics to wandb')
 
     parser.add_argument('--eval_only', action='store_true', help='Run evaluation only')
+    parser.add_argument('--baseline_latents', action='store_true', help='Run baseline task as well')
 
     known_args, _ = parser.parse_known_args()
 

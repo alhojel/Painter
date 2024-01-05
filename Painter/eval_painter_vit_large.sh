@@ -42,4 +42,5 @@ python -m torch.distributed.launch --nproc_per_node=1 \
     --log_dir models/$name/logs \
     --finetune model/painter_vit_large.pth \
     --eval_only \
+    --baseline_latents \
     --log_wandb \

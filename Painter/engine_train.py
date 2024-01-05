@@ -165,11 +165,17 @@ def evaluate_pt(data_loader, model, device, epoch=None, global_rank=None, args=N
         # compute output
         with torch.cuda.amp.autocast():
             loss, y, mask, stacked_latent = model(samples, targets, bool_masked_pos=bool_masked_pos, valid=valid)
+            if args.baseline_latents:
+                _, y_, mask_, stacked_latent_ = model(samples, samples, bool_masked_pos=bool_masked_pos, valid=valid)
 
         assert stacked_latent.shape[0] == len(meta)
-        batched_records = [(stacked_latent[i], meta[i]) for i in range(len(meta))]
         
-        pickle_file_path = 'eval.pkl'  # Replace with your file path
+        if args.baseline_latents:
+            batched_records = [(stacked_latent[i], stacked_latent_[i], meta[i]) for i in range(len(meta))]
+        else:
+            batched_records = [(stacked_latent[i], meta[i]) for i in range(len(meta))]
+
+        pickle_file_path = 'eval_baseline.pkl'  # Replace with your file path
         with open(pickle_file_path, 'ab') as f:
             pickle.dump(batched_records, f)
 
@@ -198,9 +204,32 @@ def evaluate_pt(data_loader, model, device, epoch=None, global_rank=None, args=N
             frame = torch.clip((frame * imagenet_std + imagenet_mean) * 255, 0, 255).int()
             wandb_images.append(wandb.Image(frame.numpy(), caption="x; im_masked; y; tgt"))
 
-        
+        if args.baseline_latents:
+            for i in range(len(meta)):
+                y = y_[[i]]
+                y = model.module.unpatchify(y)
+                y = torch.einsum('nchw->nhwc', y).detach().cpu()
+                mask = mask_[[i]]
+                mask = mask.detach().float().cpu()
+                mask = mask.unsqueeze(-1).repeat(1, 1, model.module.patch_size**2 *3)  # (N, H*W, p*p*3)
+                mask = model.module.unpatchify(mask)  # 1 is removing, 0 is keeping
+                mask = torch.einsum('nchw->nhwc', mask).detach().cpu()
+                x = samples[[i]]
+                x = x.detach().float().cpu()
+                x = torch.einsum('nchw->nhwc', x)
+                tgt = targets[[i]]
+                tgt = tgt.detach().float().cpu()
+                tgt = torch.einsum('nchw->nhwc', tgt)
 
-
+                new_tgt = samples[[i]]
+                new_tgt = new_tgt.detach().float().cpu()
+                new_tgt = torch.einsum('nchw->nhwc', new_tgt)
+                im_masked = new_tgt * (1 - mask)
+                
+                frame = torch.cat((x, im_masked, y, tgt), dim=2)
+                frame = frame[0]
+                frame = torch.clip((frame * imagenet_std + imagenet_mean) * 255, 0, 255).int()
+                wandb_images.append(wandb.Image(frame.numpy(), caption="BASELINE: x; im_masked; y; tgt"))
 
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
