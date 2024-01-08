@@ -160,6 +160,7 @@ def get_args_parser():
 
     parser.add_argument('--eval_only', action='store_true', help='Run evaluation only')
     parser.add_argument('--baseline_latents', action='store_true', help='Run baseline task as well')
+    parser.add_argument('--record_latents', action='store_true', help='Store latents')
 
     known_args, _ = parser.parse_known_args()
 

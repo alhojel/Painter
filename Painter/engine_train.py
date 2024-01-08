@@ -170,14 +170,15 @@ def evaluate_pt(data_loader, model, device, epoch=None, global_rank=None, args=N
 
         assert stacked_latent.shape[0] == len(meta)
         
-        if args.baseline_latents:
+        if args.baseline_latents and args.record_latents:
             batched_records = [(stacked_latent[i], stacked_latent_[i], meta[i]) for i in range(len(meta))]
-        else:
+        elif args.record_latents:
             batched_records = [(stacked_latent[i], meta[i]) for i in range(len(meta))]
 
-        pickle_file_path = 'eval_baseline.pkl'  # Replace with your file path
-        with open(pickle_file_path, 'ab') as f:
-            pickle.dump(batched_records, f)
+        if args.record_latents:
+            pickle_file_path = 'eval_baseline.pkl'  # Replace with your file path
+            with open(pickle_file_path, 'ab') as f:
+                pickle.dump(batched_records, f)
 
         metric_logger.update(loss=loss.item())
         if global_rank == 0 and args.log_wandb:
